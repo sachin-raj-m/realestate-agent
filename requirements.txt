@@ -1,8 +1,32 @@
-flask==2.3.3
-flask-cors==4.0.0
-google-cloud-texttospeech==2.14.1
-python-dotenv==1.0.0
-langchain>=0.1.0
-langchain-groq>=0.3.2
-langchain-core>=0.3.49
-gunicorn==21.2.0
+# Web Framework and Extensions
+Flask==3.0.2
+Flask-Cors==4.0.0
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# LLM Integration
+langchain==0.1.9
+langchain-groq==0.0.5
+
+# Text-to-Speech
+gTTS==2.5.1
+
+# Utility Packages
+requests==2.31.0
+python-dateutil==2.8.2
+typing-extensions==4.9.0
+
+# Logging and Performance
+logging==0.5.1.2
+
+# File Handling and Caching
+cachetools==5.3.2
+
+# Threading and Queue Management
+queue==1.0.2
+
+# Development Tools
+black==24.2.0
+pylint==3.0.3
+mypy==1.8.0
