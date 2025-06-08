@@ -1,4 +1,3 @@
-import gradio as gr
 import os
 import dotenv
 import json
