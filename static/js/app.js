@@ -21,7 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function stopSpeaking() {
         if (currentAudio) {
             currentAudio.pause();
-            currentAudio.remove();
             currentAudio = null;
         }
         avatar.classList.remove('speaking');
@@ -29,36 +28,30 @@ document.addEventListener('DOMContentLoaded', () => {
         isSpeaking = false;
     }
 
-    // Function to get cached audio URL
-    function getCachedAudioUrl(text) {
-        const cacheKey = text.trim();
-        return audioCache.get(cacheKey);
-    }
-
-    // Function to cache audio URL
-    function cacheAudioUrl(text, url) {
-        const cacheKey = text.trim();
-        audioCache.set(cacheKey, url);
+    // Function to convert base64 to audio
+    function base64ToAudio(base64String, contentType) {
+        const byteCharacters = atob(base64String);
+        const byteNumbers = new Array(byteCharacters.length);
         
-        // Limit cache size to prevent memory issues
-        if (audioCache.size > 50) {
-            const firstKey = audioCache.keys().next().value;
-            audioCache.delete(firstKey);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
+        
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: contentType });
+        return URL.createObjectURL(blob);
     }
 
     async function handleSpeech(text) {
         try {
-            // Stop any currently playing audio
             stopSpeaking();
-
-            // Start avatar animation
+            
             avatar.classList.add('speaking');
             isSpeaking = true;
             stopButton.disabled = false;
 
             // Check cache first
-            const cachedUrl = getCachedAudioUrl(text);
+            const cachedUrl = audioCache.get(text.trim());
             if (cachedUrl) {
                 currentAudio = new Audio(cachedUrl);
             } else {
@@ -75,13 +68,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     throw new Error('TTS request failed');
                 }
 
-                const blob = await response.blob();
-                const audioUrl = URL.createObjectURL(blob);
-                
-                // Cache the audio URL
-                cacheAudioUrl(text, audioUrl);
-                
-                // Create audio element
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Convert base64 to audio URL
+                const audioUrl = base64ToAudio(data.audio, data.content_type);
+                audioCache.set(text.trim(), audioUrl);
                 currentAudio = new Audio(audioUrl);
             }
 
@@ -91,7 +85,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Set up event listeners
             currentAudio.addEventListener('ended', () => {
                 stopSpeaking();
-                if (!cachedUrl) {
+                // Don't revoke cached URLs
+                if (!audioCache.has(text.trim())) {
                     URL.revokeObjectURL(currentAudio.src);
                 }
             });
@@ -99,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentAudio.addEventListener('error', (e) => {
                 console.error('Audio playback error:', e);
                 stopSpeaking();
-                if (!cachedUrl) {
+                if (!audioCache.has(text.trim())) {
                     URL.revokeObjectURL(currentAudio.src);
                 }
             });
@@ -116,13 +111,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const message = userInput.value.trim().toLowerCase();
         if (!message) return;
 
-        // Disable input while processing
         userInput.value = '';
         userInput.disabled = true;
         sendButton.disabled = true;
 
         try {
-            // Check if it's a stop command
             if (message === 'stop') {
                 stopSpeaking();
                 addMessage(message, true);
@@ -130,10 +123,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Add user message
             addMessage(message, true);
 
-            // Send message to chat endpoint
             const response = await fetch('/chat', {
                 method: 'POST',
                 headers: {
@@ -147,17 +138,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const assistantResponse = await response.text();
-            
-            // Add assistant message
             addMessage(assistantResponse, false);
-            
-            // Play TTS response
             await handleSpeech(assistantResponse);
         } catch (error) {
             console.error('Error:', error);
             addMessage('Sorry, there was an error processing your request.', false);
         } finally {
-            // Re-enable input
             userInput.disabled = false;
             sendButton.disabled = false;
             userInput.focus();

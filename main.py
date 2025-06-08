@@ -214,28 +214,34 @@ def chat_endpoint():
 
 @app.route('/tts', methods=['POST'])
 def tts_endpoint():
-    """TTS endpoint that returns audio file."""
+    """TTS endpoint that returns audio data as base64."""
     try:
         data = request.json
         if not data or not data.get('text', '').strip():
-            return 'No text provided', 400
+            return jsonify({'error': 'No text provided'}), 400
             
         text = data.get('text').strip()
         
-        # Generate speech
-        audio_file = generate_speech(text)
+        # Create an in-memory bytes buffer
+        mp3_fp = io.BytesIO()
         
-        # Send the audio file
-        return send_file(
-            audio_file,
-            mimetype='audio/mpeg',
-            as_attachment=True,
-            download_name=f"{hashlib.md5(text.encode()).hexdigest()}.mp3"
-        )
+        # Generate speech directly to the buffer
+        tts = gTTS(text=text, lang='en', slow=False)
+        tts.write_to_fp(mp3_fp)
+        mp3_fp.seek(0)
+        
+        # Convert to base64
+        audio_base64 = base64.b64encode(mp3_fp.read()).decode('utf-8')
+        
+        # Return as JSON with content type and base64 data
+        return jsonify({
+            'audio': audio_base64,
+            'content_type': 'audio/mpeg'
+        })
     
     except Exception as e:
         logger.error(f"Error in tts endpoint: {str(e)}")
-        return str(e), 500
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     logger.info("Starting Flask server...")
