@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Real Estate Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <div class="chat-container">
+            <div class="avatar-container">
+                <div class="avatar" id="avatar">
+                    <div class="face">
+                        <div class="eyebrows">
+                            <div class="eyebrow left"></div>
+                            <div class="eyebrow right"></div>
+                        </div>
+                        <div class="eyes">
+                            <div class="eye left">
+                                <div class="pupil"></div>
+                            </div>
+                            <div class="eye right">
+                                <div class="pupil"></div>
+                            </div>
+                        </div>
+                        <div class="nose"></div>
+                        <div class="mouth-container">
+                            <div class="mouth"></div>
+                        </div>
+                    </div>
+                </div>
+                <button id="stop-button" class="stop-button" disabled>Stop Speaking</button>
+            </div>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-input-container">
+                <input type="text" id="user-input" placeholder="Type your message...">
+                <button id="send-button">Send</button>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+
+</html>
