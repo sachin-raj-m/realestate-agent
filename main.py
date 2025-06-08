@@ -11,7 +11,7 @@ from langchain_groq import ChatGroq
 from langchain.prompts.chat import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from flask import Flask, request, jsonify, send_file, Response, render_template
 from flask_cors import CORS
-import azure.cognitiveservices.speech as speechsdk
+import pyttsx3
 import tempfile
 import threading
 from queue import Queue
@@ -36,13 +36,8 @@ CORS(app)
 # Load environment variables
 dotenv.load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
-
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable is not set")
-if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
-    raise ValueError("Azure Speech credentials are not properly configured")
 
 # Constants
 MAX_HISTORY_LENGTH = 10
@@ -82,6 +77,42 @@ rate_limit_lock = Lock()
 
 # Initialize TTL cache (cache entries expire after 1 hour)
 tts_cache = TTLCache(maxsize=100, ttl=3600)
+
+# Initialize pyttsx3 engine
+def get_tts_engine():
+    engine = pyttsx3.init()
+    # Configure the engine
+    engine.setProperty('rate', 175)     # Speed of speech
+    engine.setProperty('volume', 1.0)   # Volume (0.0 to 1.0)
+    voices = engine.getProperty('voices')
+    # Try to set a female voice if available
+    for voice in voices:
+        if 'female' in voice.name.lower():
+            engine.setProperty('voice', voice.id)
+            break
+    return engine
+
+def generate_speech(text: str) -> bytes:
+    """Generate speech using pyttsx3."""
+    try:
+        # Create a temporary file to store the audio
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            # Get the engine and generate speech
+            engine = get_tts_engine()
+            engine.save_to_file(text, temp_file.name)
+            engine.runAndWait()
+            
+            # Read the generated audio file
+            with open(temp_file.name, 'rb') as audio_file:
+                audio_data = audio_file.read()
+            
+            # Clean up the temporary file
+            os.unlink(temp_file.name)
+            
+            return audio_data
+    except Exception as e:
+        logger.error(f"Error generating speech: {e}")
+        raise
 
 def is_rate_limited():
     """Check if we're currently rate limited."""
@@ -202,39 +233,6 @@ def generate_cache_key(message: str, context_hash: str) -> str:
     """Generate cache key efficiently."""
     return hashlib.md5(f"{message.lower().strip()}_{context_hash}".encode('utf-8')).hexdigest()
 
-def get_azure_tts_audio(text: str) -> bytes:
-    """Generate speech using Azure TTS."""
-    # Initialize speech config
-    speech_config = speechsdk.SpeechConfig(
-        subscription=AZURE_SPEECH_KEY,
-        region=AZURE_SPEECH_REGION
-    )
-    
-    # Configure voice
-    speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
-    
-    # Create an audio output config that outputs to a stream
-    audio_output = io.BytesIO()
-    audio_config = speechsdk.audio.AudioOutputConfig(
-        stream=audio_output
-    )
-    
-    # Create the speech synthesizer
-    speech_synthesizer = speechsdk.SpeechSynthesizer(
-        speech_config=speech_config,
-        audio_config=audio_config
-    )
-    
-    # Synthesize speech
-    result = speech_synthesizer.speak_text_async(text).get()
-    
-    # Check result
-    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        return audio_output.getvalue()
-    else:
-        error_details = result.properties.get(speechsdk.PropertyId.SpeechServiceResponse_JsonErrorDetails)
-        raise Exception(f"Speech synthesis failed: {error_details if error_details else result.reason}")
-
 @app.route('/')
 def index():
     """Serve the main page."""
@@ -286,8 +284,8 @@ def tts_endpoint():
             })
 
         try:
-            logger.info("TTS endpoint: Generating speech with Azure TTS")
-            audio_data = get_azure_tts_audio(text)
+            logger.info("TTS endpoint: Generating speech with pyttsx3")
+            audio_data = generate_speech(text)
             
             # Convert to base64
             audio_base64 = base64.b64encode(audio_data).decode('utf-8')
@@ -303,7 +301,7 @@ def tts_endpoint():
             })
             
         except Exception as inner_e:
-            logger.error(f"Azure TTS error: {str(inner_e)}", exc_info=True)
+            logger.error(f"TTS error: {str(inner_e)}", exc_info=True)
             return jsonify({'error': f'Text-to-speech conversion failed: {str(inner_e)}'}), 500
     
     except Exception as e:
