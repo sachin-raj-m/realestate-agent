@@ -5,10 +5,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopButton = document.getElementById('stop-button');
     const avatar = document.getElementById('avatar');
     
-    let currentAudio = null;
+    let currentUtterance = null;
     let isSpeaking = false;
-    const PLAYBACK_RATE = 1.5;
-    const audioCache = new Map();
+    const SPEECH_RATE = 1.1;  // Slightly faster than normal
+
+    // Initialize speech synthesis
+    const synth = window.speechSynthesis;
+    let preferredVoice = null;
+
+    // Get available voices and set preferred voice
+    function loadVoices() {
+        const voices = synth.getVoices();
+        // Try to find a female English voice
+        preferredVoice = voices.find(voice => 
+            voice.lang.includes('en') && 
+            voice.name.toLowerCase().includes('female')
+        ) || voices.find(voice => 
+            voice.lang.includes('en')  // Fallback to any English voice
+        ) || voices[0];  // Fallback to any voice
+    }
+
+    // Load voices when they're available
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = loadVoices;
+    }
+    loadVoices();
 
     function addMessage(text, isUser) {
         const messageDiv = document.createElement('div');
@@ -19,27 +40,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function stopSpeaking() {
-        if (currentAudio) {
-            currentAudio.pause();
-            currentAudio = null;
+        if (synth.speaking) {
+            synth.cancel();
+        }
+        if (currentUtterance) {
+            currentUtterance = null;
         }
         avatar.classList.remove('speaking');
         stopButton.disabled = true;
         isSpeaking = false;
-    }
-
-    // Function to convert base64 to audio
-    function base64ToAudio(base64String, contentType) {
-        const byteCharacters = atob(base64String);
-        const byteNumbers = new Array(byteCharacters.length);
-        
-        for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: contentType });
-        return URL.createObjectURL(blob);
     }
 
     async function handleSpeech(text) {
@@ -50,59 +59,29 @@ document.addEventListener('DOMContentLoaded', () => {
             isSpeaking = true;
             stopButton.disabled = false;
 
-            console.log('Sending TTS request...');
-            // Get audio from TTS endpoint
-            const response = await fetch('/tts', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ text }),
-            });
-
-            console.log('TTS response status:', response.status);
-            const responseData = await response.json();
-
-            if (!response.ok) {
-                throw new Error(`TTS request failed: ${responseData.error || response.statusText}`);
-            }
-
-            if (responseData.error) {
-                throw new Error(`TTS error: ${responseData.error}`);
-            }
-
-            if (!responseData.audio || !responseData.content_type) {
-                throw new Error('Invalid TTS response format');
-            }
-
-            console.log('Converting audio data...', responseData.cached ? '(from cache)' : '(new generation)');
-            // Convert base64 to audio URL
-            const audioUrl = base64ToAudio(responseData.audio, responseData.content_type);
-            currentAudio = new Audio(audioUrl);
-
-            // Set up audio properties
-            currentAudio.playbackRate = PLAYBACK_RATE;
+            // Create and configure speech utterance
+            currentUtterance = new SpeechSynthesisUtterance(text);
+            currentUtterance.voice = preferredVoice;
+            currentUtterance.rate = SPEECH_RATE;
+            currentUtterance.pitch = 1.0;
 
             // Set up event listeners
-            currentAudio.addEventListener('ended', () => {
+            currentUtterance.onend = () => {
                 stopSpeaking();
-                URL.revokeObjectURL(currentAudio.src);
-            });
+            };
 
-            currentAudio.addEventListener('error', (e) => {
-                console.error('Audio playback error:', e.target.error);
+            currentUtterance.onerror = (e) => {
+                console.error('Speech synthesis error:', e);
                 stopSpeaking();
-                URL.revokeObjectURL(currentAudio.src);
-                throw new Error(`Audio playback failed: ${e.target.error.message || 'Unknown error'}`);
-            });
+                addMessage('⚠️ Speech synthesis failed. Please try again.', false);
+            };
 
-            console.log('Playing audio...');
-            // Play the audio
-            await currentAudio.play();
+            // Start speaking
+            synth.speak(currentUtterance);
+
         } catch (error) {
             console.error('Error in handleSpeech:', error);
             stopSpeaking();
-            // Add error message to chat
             addMessage(`⚠️ Speech Error: ${error.message}`, false);
         }
     }
@@ -140,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const assistantResponse = await response.text();
             addMessage(assistantResponse, false);
             await handleSpeech(assistantResponse);
+
         } catch (error) {
             console.error('Error:', error);
             addMessage('Sorry, there was an error processing your request.', false);

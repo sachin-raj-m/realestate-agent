@@ -9,14 +9,10 @@ python-dotenv
 langchain
 langchain-groq
 
-# Text-to-Speech
-edge-tts
-
 # Utility Packages
 requests
 python-dateutil
 typing-extensions
-cachetools
 
 # Development Tools
 black
