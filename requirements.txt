@@ -21,3 +21,5 @@ typing-extensions
 black
 pylint
 mypy
+gunicorn
+
