@@ -20,6 +20,7 @@ import base64
 import io
 from time import sleep
 from threading import Lock
+from cachetools import TTLCache
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -73,6 +74,9 @@ RATE_LIMIT_WINDOW = 60  # seconds
 MAX_REQUESTS = 100  # maximum requests per window
 request_timestamps = []
 rate_limit_lock = Lock()
+
+# Initialize TTL cache (cache entries expire after 1 hour)
+tts_cache = TTLCache(maxsize=100, ttl=3600)
 
 def is_rate_limited():
     """Check if we're currently rate limited."""
@@ -247,10 +251,11 @@ def tts_endpoint():
             return jsonify({'error': 'No text provided'}), 400
             
         text = data.get('text').strip()
+        text_hash = hashlib.md5(text.encode()).hexdigest()
         logger.info(f"TTS endpoint: Processing text of length {len(text)}")
 
         # Check cache first
-        cached_audio = get_cached_audio(text)
+        cached_audio = tts_cache.get(text_hash)
         if cached_audio:
             logger.info("TTS endpoint: Returning cached audio")
             return jsonify({
@@ -271,14 +276,12 @@ def tts_endpoint():
             tts.write_to_fp(mp3_fp)
             mp3_fp.seek(0)
             
-            # Read the audio data
+            # Read the audio data and convert to base64
             audio_data = mp3_fp.read()
-            
-            # Cache the audio data
-            cache_audio(text, audio_data)
-            
-            # Convert to base64
             audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            
+            # Cache the base64 audio data
+            tts_cache[text_hash] = audio_base64
             
             logger.info(f"TTS endpoint: Successfully processed. Base64 length: {len(audio_base64)}")
             return jsonify({

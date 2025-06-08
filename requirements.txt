@@ -16,6 +16,7 @@ gTTS
 requests
 python-dateutil
 typing-extensions
+cachetools
 
 # Development Tools
 black
