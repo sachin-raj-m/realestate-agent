@@ -218,30 +218,42 @@ def tts_endpoint():
     try:
         data = request.json
         if not data or not data.get('text', '').strip():
+            logger.error("TTS endpoint: No text provided in request")
             return jsonify({'error': 'No text provided'}), 400
             
         text = data.get('text').strip()
+        logger.info(f"TTS endpoint: Processing text of length {len(text)}")
         
-        # Create an in-memory bytes buffer
-        mp3_fp = io.BytesIO()
-        
-        # Generate speech directly to the buffer
-        tts = gTTS(text=text, lang='en', slow=False)
-        tts.write_to_fp(mp3_fp)
-        mp3_fp.seek(0)
-        
-        # Convert to base64
-        audio_base64 = base64.b64encode(mp3_fp.read()).decode('utf-8')
-        
-        # Return as JSON with content type and base64 data
-        return jsonify({
-            'audio': audio_base64,
-            'content_type': 'audio/mpeg'
-        })
+        try:
+            # Create an in-memory bytes buffer
+            mp3_fp = io.BytesIO()
+            
+            # Generate speech directly to the buffer
+            logger.info("TTS endpoint: Initializing gTTS")
+            tts = gTTS(text=text, lang='en', slow=False)
+            
+            logger.info("TTS endpoint: Writing to buffer")
+            tts.write_to_fp(mp3_fp)
+            mp3_fp.seek(0)
+            
+            # Convert to base64
+            logger.info("TTS endpoint: Converting to base64")
+            audio_data = mp3_fp.read()
+            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            
+            logger.info(f"TTS endpoint: Successfully processed. Base64 length: {len(audio_base64)}")
+            return jsonify({
+                'audio': audio_base64,
+                'content_type': 'audio/mpeg'
+            })
+            
+        except Exception as inner_e:
+            logger.error(f"TTS endpoint inner error: {str(inner_e)}", exc_info=True)
+            return jsonify({'error': f'TTS generation failed: {str(inner_e)}'}), 500
     
     except Exception as e:
-        logger.error(f"Error in tts endpoint: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"TTS endpoint outer error: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     logger.info("Starting Flask server...")

@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cachedUrl) {
                 currentAudio = new Audio(cachedUrl);
             } else {
+                console.log('Sending TTS request...');
                 // Get audio from TTS endpoint
                 const response = await fetch('/tts', {
                     method: 'POST',
@@ -64,17 +65,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({ text }),
                 });
 
+                console.log('TTS response status:', response.status);
+                const responseData = await response.json();
+
                 if (!response.ok) {
-                    throw new Error('TTS request failed');
+                    throw new Error(`TTS request failed: ${responseData.error || response.statusText}`);
                 }
 
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
+                if (responseData.error) {
+                    throw new Error(`TTS error: ${responseData.error}`);
                 }
 
+                if (!responseData.audio || !responseData.content_type) {
+                    throw new Error('Invalid TTS response format');
+                }
+
+                console.log('Converting audio data...');
                 // Convert base64 to audio URL
-                const audioUrl = base64ToAudio(data.audio, data.content_type);
+                const audioUrl = base64ToAudio(responseData.audio, responseData.content_type);
                 audioCache.set(text.trim(), audioUrl);
                 currentAudio = new Audio(audioUrl);
             }
@@ -92,18 +100,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             currentAudio.addEventListener('error', (e) => {
-                console.error('Audio playback error:', e);
+                console.error('Audio playback error:', e.target.error);
                 stopSpeaking();
                 if (!audioCache.has(text.trim())) {
                     URL.revokeObjectURL(currentAudio.src);
                 }
+                throw new Error(`Audio playback failed: ${e.target.error.message || 'Unknown error'}`);
             });
 
+            console.log('Playing audio...');
             // Play the audio
             await currentAudio.play();
         } catch (error) {
-            console.error('Error playing audio:', error);
+            console.error('Error in handleSpeech:', error);
             stopSpeaking();
+            // Add error message to chat
+            addMessage(`⚠️ Speech Error: ${error.message}`, false);
         }
     }
 
