@@ -11,13 +11,15 @@ from langchain_groq import ChatGroq
 from langchain.prompts.chat import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from flask import Flask, request, jsonify, send_file, Response, render_template
 from flask_cors import CORS
-from gtts import gTTS
+from gtts import gTTS, gTTSError
 import tempfile
 import threading
 from queue import Queue
 from functools import lru_cache
 import base64
 import io
+from time import sleep
+from threading import Lock
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+CORS(app)
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -64,6 +67,28 @@ except Exception as e:
 # Cache for conversation history and responses
 conversation_history: List[Dict[str, str]] = []
 response_cache: Dict[str, Tuple[str, float]] = {}
+
+# Rate limiting configuration
+RATE_LIMIT_WINDOW = 60  # seconds
+MAX_REQUESTS = 100  # maximum requests per window
+request_timestamps = []
+rate_limit_lock = Lock()
+
+def is_rate_limited():
+    """Check if we're currently rate limited."""
+    current_time = time.time()
+    with rate_limit_lock:
+        # Remove timestamps older than the window
+        while request_timestamps and request_timestamps[0] < current_time - RATE_LIMIT_WINDOW:
+            request_timestamps.pop(0)
+        
+        # Check if we're at the limit
+        if len(request_timestamps) >= MAX_REQUESTS:
+            return True
+        
+        # Add current timestamp
+        request_timestamps.append(current_time)
+        return False
 
 def answer_query(message: str, chat_history: List[Dict[str, str]]) -> str:
     """Process user query and generate response using GROQ."""
@@ -223,7 +248,17 @@ def tts_endpoint():
             
         text = data.get('text').strip()
         logger.info(f"TTS endpoint: Processing text of length {len(text)}")
-        
+
+        # Check cache first
+        cached_audio = get_cached_audio(text)
+        if cached_audio:
+            logger.info("TTS endpoint: Returning cached audio")
+            return jsonify({
+                'audio': cached_audio,
+                'content_type': 'audio/mpeg',
+                'cached': True
+            })
+
         try:
             # Create an in-memory bytes buffer
             mp3_fp = io.BytesIO()
@@ -236,24 +271,59 @@ def tts_endpoint():
             tts.write_to_fp(mp3_fp)
             mp3_fp.seek(0)
             
-            # Convert to base64
-            logger.info("TTS endpoint: Converting to base64")
+            # Read the audio data
             audio_data = mp3_fp.read()
+            
+            # Cache the audio data
+            cache_audio(text, audio_data)
+            
+            # Convert to base64
             audio_base64 = base64.b64encode(audio_data).decode('utf-8')
             
             logger.info(f"TTS endpoint: Successfully processed. Base64 length: {len(audio_base64)}")
             return jsonify({
                 'audio': audio_base64,
-                'content_type': 'audio/mpeg'
+                'content_type': 'audio/mpeg',
+                'cached': False
             })
+            
+        except gTTSError as e:
+            logger.error(f"gTTS error: {str(e)}", exc_info=True)
+            return jsonify({'error': f'Text-to-speech conversion failed. Please try again.'}), 500
             
         except Exception as inner_e:
             logger.error(f"TTS endpoint inner error: {str(inner_e)}", exc_info=True)
-            return jsonify({'error': f'TTS generation failed: {str(inner_e)}'}), 500
+            return jsonify({'error': f'An unexpected error occurred. Please try again.'}), 500
     
     except Exception as e:
         logger.error(f"TTS endpoint outer error: {str(e)}", exc_info=True)
         return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+def get_cache_path(text: str) -> str:
+    """Generate a cache file path for the given text."""
+    text_hash = hashlib.md5(text.encode()).hexdigest()
+    return os.path.join("tts_cache", f"{text_hash}.mp3")
+
+def get_cached_audio(text: str) -> Optional[str]:
+    """Get cached audio as base64 if it exists."""
+    cache_path = get_cache_path(text)
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'rb') as f:
+                audio_data = f.read()
+                return base64.b64encode(audio_data).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error reading cache file: {e}")
+    return None
+
+def cache_audio(text: str, audio_data: bytes) -> None:
+    """Cache audio data to file."""
+    try:
+        cache_path = get_cache_path(text)
+        with open(cache_path, 'wb') as f:
+            f.write(audio_data)
+    except Exception as e:
+        logger.error(f"Error writing cache file: {e}")
 
 if __name__ == '__main__':
     logger.info("Starting Flask server...")

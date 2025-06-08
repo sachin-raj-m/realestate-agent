@@ -50,42 +50,35 @@ document.addEventListener('DOMContentLoaded', () => {
             isSpeaking = true;
             stopButton.disabled = false;
 
-            // Check cache first
-            const cachedUrl = audioCache.get(text.trim());
-            if (cachedUrl) {
-                currentAudio = new Audio(cachedUrl);
-            } else {
-                console.log('Sending TTS request...');
-                // Get audio from TTS endpoint
-                const response = await fetch('/tts', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ text }),
-                });
+            console.log('Sending TTS request...');
+            // Get audio from TTS endpoint
+            const response = await fetch('/tts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ text }),
+            });
 
-                console.log('TTS response status:', response.status);
-                const responseData = await response.json();
+            console.log('TTS response status:', response.status);
+            const responseData = await response.json();
 
-                if (!response.ok) {
-                    throw new Error(`TTS request failed: ${responseData.error || response.statusText}`);
-                }
-
-                if (responseData.error) {
-                    throw new Error(`TTS error: ${responseData.error}`);
-                }
-
-                if (!responseData.audio || !responseData.content_type) {
-                    throw new Error('Invalid TTS response format');
-                }
-
-                console.log('Converting audio data...');
-                // Convert base64 to audio URL
-                const audioUrl = base64ToAudio(responseData.audio, responseData.content_type);
-                audioCache.set(text.trim(), audioUrl);
-                currentAudio = new Audio(audioUrl);
+            if (!response.ok) {
+                throw new Error(`TTS request failed: ${responseData.error || response.statusText}`);
             }
+
+            if (responseData.error) {
+                throw new Error(`TTS error: ${responseData.error}`);
+            }
+
+            if (!responseData.audio || !responseData.content_type) {
+                throw new Error('Invalid TTS response format');
+            }
+
+            console.log('Converting audio data...', responseData.cached ? '(from cache)' : '(new generation)');
+            // Convert base64 to audio URL
+            const audioUrl = base64ToAudio(responseData.audio, responseData.content_type);
+            currentAudio = new Audio(audioUrl);
 
             // Set up audio properties
             currentAudio.playbackRate = PLAYBACK_RATE;
@@ -93,18 +86,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // Set up event listeners
             currentAudio.addEventListener('ended', () => {
                 stopSpeaking();
-                // Don't revoke cached URLs
-                if (!audioCache.has(text.trim())) {
-                    URL.revokeObjectURL(currentAudio.src);
-                }
+                URL.revokeObjectURL(currentAudio.src);
             });
 
             currentAudio.addEventListener('error', (e) => {
                 console.error('Audio playback error:', e.target.error);
                 stopSpeaking();
-                if (!audioCache.has(text.trim())) {
-                    URL.revokeObjectURL(currentAudio.src);
-                }
+                URL.revokeObjectURL(currentAudio.src);
                 throw new Error(`Audio playback failed: ${e.target.error.message || 'Unknown error'}`);
             });
 
