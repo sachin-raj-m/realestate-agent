@@ -1,23 +1,23 @@
 # Web Framework and Extensions
-Flask==3.0.2
-Flask-Cors==4.0.0
+Flask
+Flask-Cors
 
 # Environment Variables
-python-dotenv==1.0.1
+python-dotenv
 
 # LLM Integration
-langchain==0.1.9
-langchain-groq==0.1.10
+langchain
+langchain-groq
 
 # Text-to-Speech
-gTTS==2.5.1
+gTTS
 
 # Utility Packages
-requests==2.31.0
-python-dateutil==2.8.2
-typing-extensions==4.9.0
+requests
+python-dateutil
+typing-extensions
 
 # Development Tools
-black==24.2.0
-pylint==3.0.3
-mypy==1.8.0
+black
+pylint
+mypy
