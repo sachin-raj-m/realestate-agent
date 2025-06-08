@@ -7,7 +7,7 @@ python-dotenv==1.0.1
 
 # LLM Integration
 langchain==0.1.9
-langchain-groq==0.1.1
+langchain-groq==0.1.10
 
 # Text-to-Speech
 gTTS==2.5.1
