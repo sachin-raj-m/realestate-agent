@@ -10,8 +10,7 @@ langchain
 langchain-groq
 
 # Text-to-Speech
-pyttsx3
-espeak
+edge-tts
 
 # Utility Packages
 requests
