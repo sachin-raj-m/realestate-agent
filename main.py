@@ -11,7 +11,7 @@ from langchain_groq import ChatGroq
 from langchain.prompts.chat import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from flask import Flask, request, jsonify, send_file, Response, render_template
 from flask_cors import CORS
-from gtts import gTTS, gTTSError
+import azure.cognitiveservices.speech as speechsdk
 import tempfile
 import threading
 from queue import Queue
@@ -36,8 +36,13 @@ CORS(app)
 # Load environment variables
 dotenv.load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
+
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable is not set")
+if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
+    raise ValueError("Azure Speech credentials are not properly configured")
 
 # Constants
 MAX_HISTORY_LENGTH = 10
@@ -197,22 +202,38 @@ def generate_cache_key(message: str, context_hash: str) -> str:
     """Generate cache key efficiently."""
     return hashlib.md5(f"{message.lower().strip()}_{context_hash}".encode('utf-8')).hexdigest()
 
-def generate_speech(text: str) -> str:
-    """Generate speech using gTTS and return the file path."""
-    try:
-        # Create a unique filename
-        filename = f"{hashlib.md5(text.encode()).hexdigest()}.mp3"
-        filepath = os.path.join("tts_cache", filename)
-        
-        # Generate speech if not in cache
-        if not os.path.exists(filepath):
-            tts = gTTS(text=text, lang='en', slow=False)
-            tts.save(filepath)
-        
-        return filepath
-    except Exception as e:
-        logger.error(f"Error generating speech: {e}")
-        raise
+def get_azure_tts_audio(text: str) -> bytes:
+    """Generate speech using Azure TTS."""
+    # Initialize speech config
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_KEY,
+        region=AZURE_SPEECH_REGION
+    )
+    
+    # Configure voice
+    speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+    
+    # Create an audio output config that outputs to a stream
+    audio_output = io.BytesIO()
+    audio_config = speechsdk.audio.AudioOutputConfig(
+        stream=audio_output
+    )
+    
+    # Create the speech synthesizer
+    speech_synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=audio_config
+    )
+    
+    # Synthesize speech
+    result = speech_synthesizer.speak_text_async(text).get()
+    
+    # Check result
+    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+        return audio_output.getvalue()
+    else:
+        error_details = result.properties.get(speechsdk.PropertyId.SpeechServiceResponse_JsonErrorDetails)
+        raise Exception(f"Speech synthesis failed: {error_details if error_details else result.reason}")
 
 @app.route('/')
 def index():
@@ -260,24 +281,15 @@ def tts_endpoint():
             logger.info("TTS endpoint: Returning cached audio")
             return jsonify({
                 'audio': cached_audio,
-                'content_type': 'audio/mpeg',
+                'content_type': 'audio/wav',
                 'cached': True
             })
 
         try:
-            # Create an in-memory bytes buffer
-            mp3_fp = io.BytesIO()
+            logger.info("TTS endpoint: Generating speech with Azure TTS")
+            audio_data = get_azure_tts_audio(text)
             
-            # Generate speech directly to the buffer
-            logger.info("TTS endpoint: Initializing gTTS")
-            tts = gTTS(text=text, lang='en', slow=False)
-            
-            logger.info("TTS endpoint: Writing to buffer")
-            tts.write_to_fp(mp3_fp)
-            mp3_fp.seek(0)
-            
-            # Read the audio data and convert to base64
-            audio_data = mp3_fp.read()
+            # Convert to base64
             audio_base64 = base64.b64encode(audio_data).decode('utf-8')
             
             # Cache the base64 audio data
@@ -286,17 +298,13 @@ def tts_endpoint():
             logger.info(f"TTS endpoint: Successfully processed. Base64 length: {len(audio_base64)}")
             return jsonify({
                 'audio': audio_base64,
-                'content_type': 'audio/mpeg',
+                'content_type': 'audio/wav',
                 'cached': False
             })
             
-        except gTTSError as e:
-            logger.error(f"gTTS error: {str(e)}", exc_info=True)
-            return jsonify({'error': f'Text-to-speech conversion failed. Please try again.'}), 500
-            
         except Exception as inner_e:
-            logger.error(f"TTS endpoint inner error: {str(inner_e)}", exc_info=True)
-            return jsonify({'error': f'An unexpected error occurred. Please try again.'}), 500
+            logger.error(f"Azure TTS error: {str(inner_e)}", exc_info=True)
+            return jsonify({'error': f'Text-to-speech conversion failed: {str(inner_e)}'}), 500
     
     except Exception as e:
         logger.error(f"TTS endpoint outer error: {str(e)}", exc_info=True)
@@ -305,7 +313,7 @@ def tts_endpoint():
 def get_cache_path(text: str) -> str:
     """Generate a cache file path for the given text."""
     text_hash = hashlib.md5(text.encode()).hexdigest()
-    return os.path.join("tts_cache", f"{text_hash}.mp3")
+    return os.path.join("tts_cache", f"{text_hash}.wav")
 
 def get_cached_audio(text: str) -> Optional[str]:
     """Get cached audio as base64 if it exists."""

@@ -10,7 +10,7 @@ langchain
 langchain-groq
 
 # Text-to-Speech
-gTTS
+azure-cognitiveservices-speech
 
 # Utility Packages
 requests
