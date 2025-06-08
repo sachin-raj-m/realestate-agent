@@ -112,17 +112,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ message }),
             });
 
-            if (!response.ok) {
-                throw new Error('Chat request failed');
+            const contentType = response.headers.get('content-type');
+            let responseData;
+
+            if (contentType && contentType.includes('application/json')) {
+                responseData = await response.json();
+                throw new Error(responseData.error || 'Unknown error occurred');
+            } else {
+                responseData = await response.text();
             }
 
-            const assistantResponse = await response.text();
-            addMessage(assistantResponse, false);
-            await handleSpeech(assistantResponse);
+            if (!response.ok) {
+                throw new Error('Failed to get response from server');
+            }
+
+            addMessage(responseData, false);
+            await handleSpeech(responseData);
 
         } catch (error) {
             console.error('Error:', error);
-            addMessage('Sorry, there was an error processing your request.', false);
+            addMessage(`⚠️ Error: ${error.message}`, false);
         } finally {
             userInput.disabled = false;
             sendButton.disabled = false;
